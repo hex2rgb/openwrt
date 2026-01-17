@@ -89,6 +89,9 @@ jobs:
 
       - name: Build firmware
         run: |
+          export GO111MODULE=on
+          export GOPROXY=https://proxy.golang.org,direct
+          export GOSUMDB=sum.golang.org
           make -j$(($(nproc) + 1)) V=s 2>&1 | tee build.log
 
       - name: Get firmware info
