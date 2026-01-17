@@ -115,16 +115,14 @@ jobs:
           retention-days: 30
 
       - name: Create Release
-        if: |
-          (github.event_name == 'release' && github.event.action == 'created') ||
-          (github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true')
+        if: success()
         uses: softprops/action-gh-release@v1
         with:
           files: |
             bin/targets/ramips/mt7621/openwrt-ramips-mt7621-d-team_newifi-d2-*.bin
             bin/targets/ramips/mt7621/*.manifest
-          tag_name: newifi-d2-${{ github.sha }}
-          name: OpenWrt for Newifi D2 - ${{ github.sha }}
+          tag_name: newifi-d2-${{ github.run_number }}
+          name: OpenWrt for Newifi D2 - Build ${{ github.run_number }}
           body: |
             ## OpenWrt Firmware for Newifi D2
 
