@@ -4,7 +4,7 @@ on:
   push:
     branches:
       - release-23.05.6
-    # 只有推送 main 或 master 分支时才会触发编译
+    # 只有推送 release-23.05.6 分支时才会触发编译
   workflow_dispatch:
     inputs:
       create_release:
@@ -55,13 +55,20 @@ jobs:
             libssl-dev \
             python3 \
             python3-distutils \
+            python3-setuptools \
             rsync \
             unzip \
             wget \
-            zlib1g-dev
+            zlib1g-dev \
+            libc6-dev \
+            libstdc++6 \
+            subversion \
+            flex \
+            bison \
+            which
 
       - name: Setup ccache
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: |
             ~/.ccache
@@ -84,36 +91,21 @@ jobs:
         run: |
           make -j$(($(nproc) + 1)) V=s 2>&1 | tee build.log
 
-      - name: Check build result
-        run: |
-          if [ ! -f "bin/targets/ramips/mt7621/openwrt-ramips-mt7621-d-team_newifi-d2-squashfs-sysupgrade.bin" ]; then
-            echo "Build failed: firmware file not found"
-            exit 1
-          fi
-          echo "Build successful!"
-
       - name: Get firmware info
         id: firmware
         run: |
           FIRMWARE_FILE="bin/targets/ramips/mt7621/openwrt-ramips-mt7621-d-team_newifi-d2-squashfs-sysupgrade.bin"
-          if [ -f "$FIRMWARE_FILE" ]; then
-            FIRMWARE_SIZE=$(du -h "$FIRMWARE_FILE" | cut -f1)
-            FIRMWARE_MD5=$(md5sum "$FIRMWARE_FILE" | cut -d' ' -f1)
-            FIRMWARE_SHA256=$(sha256sum "$FIRMWARE_FILE" | cut -d' ' -f1)
-            
-            echo "file=$FIRMWARE_FILE" >> $GITHUB_OUTPUT
-            echo "size=$FIRMWARE_SIZE" >> $GITHUB_OUTPUT
-            echo "md5=$FIRMWARE_MD5" >> $GITHUB_OUTPUT
-            echo "sha256=$FIRMWARE_SHA256" >> $GITHUB_OUTPUT
-            
-            echo "Firmware: $FIRMWARE_FILE"
-            echo "Size: $FIRMWARE_SIZE"
-            echo "MD5: $FIRMWARE_MD5"
-            echo "SHA256: $FIRMWARE_SHA256"
-          fi
+          FIRMWARE_SIZE=$(du -h "$FIRMWARE_FILE" | cut -f1)
+          FIRMWARE_MD5=$(md5sum "$FIRMWARE_FILE" | cut -d' ' -f1)
+          FIRMWARE_SHA256=$(sha256sum "$FIRMWARE_FILE" | cut -d' ' -f1)
+          
+          echo "file=$FIRMWARE_FILE" >> $GITHUB_OUTPUT
+          echo "size=$FIRMWARE_SIZE" >> $GITHUB_OUTPUT
+          echo "md5=$FIRMWARE_MD5" >> $GITHUB_OUTPUT
+          echo "sha256=$FIRMWARE_SHA256" >> $GITHUB_OUTPUT
 
       - name: Upload firmware artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: openwrt-newifi-d2-firmware
           path: |
