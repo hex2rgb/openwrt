@@ -1,0 +1,173 @@
+name: Build OpenWrt for Newifi D2
+
+on:
+  push:
+    branches:
+      - release-23.05.6
+    # 只有推送 main 或 master 分支时才会触发编译
+  workflow_dispatch:
+    inputs:
+      create_release:
+        description: 'Create GitHub Release'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
+  release:
+    types: [created]
+
+permissions:
+  contents: write
+  packages: read
+
+jobs:
+  build:
+    name: Build Firmware
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+          fetch-depth: 0
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            ccache \
+            ecj \
+            fastjar \
+            file \
+            g++ \
+            gawk \
+            gettext \
+            git \
+            java-propose-classpath \
+            libelf-dev \
+            libncurses5-dev \
+            libncursesw5-dev \
+            libssl-dev \
+            python3 \
+            python3-distutils \
+            rsync \
+            unzip \
+            wget \
+            zlib1g-dev
+
+      - name: Setup ccache
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.ccache
+            ccache
+          key: ${{ runner.os }}-ccache-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-ccache-
+
+      - name: Update feeds
+        run: |
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+      - name: Copy configuration
+        run: |
+          cp .config.newifi-d2-optimized .config
+          make defconfig
+
+      - name: Build firmware
+        run: |
+          make -j$(($(nproc) + 1)) V=s 2>&1 | tee build.log
+
+      - name: Check build result
+        run: |
+          if [ ! -f "bin/targets/ramips/mt7621/openwrt-ramips-mt7621-d-team_newifi-d2-squashfs-sysupgrade.bin" ]; then
+            echo "Build failed: firmware file not found"
+            exit 1
+          fi
+          echo "Build successful!"
+
+      - name: Get firmware info
+        id: firmware
+        run: |
+          FIRMWARE_FILE="bin/targets/ramips/mt7621/openwrt-ramips-mt7621-d-team_newifi-d2-squashfs-sysupgrade.bin"
+          if [ -f "$FIRMWARE_FILE" ]; then
+            FIRMWARE_SIZE=$(du -h "$FIRMWARE_FILE" | cut -f1)
+            FIRMWARE_MD5=$(md5sum "$FIRMWARE_FILE" | cut -d' ' -f1)
+            FIRMWARE_SHA256=$(sha256sum "$FIRMWARE_FILE" | cut -d' ' -f1)
+            
+            echo "file=$FIRMWARE_FILE" >> $GITHUB_OUTPUT
+            echo "size=$FIRMWARE_SIZE" >> $GITHUB_OUTPUT
+            echo "md5=$FIRMWARE_MD5" >> $GITHUB_OUTPUT
+            echo "sha256=$FIRMWARE_SHA256" >> $GITHUB_OUTPUT
+            
+            echo "Firmware: $FIRMWARE_FILE"
+            echo "Size: $FIRMWARE_SIZE"
+            echo "MD5: $FIRMWARE_MD5"
+            echo "SHA256: $FIRMWARE_SHA256"
+          fi
+
+      - name: Upload firmware artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: openwrt-newifi-d2-firmware
+          path: |
+            bin/targets/ramips/mt7621/openwrt-ramips-mt7621-d-team_newifi-d2-*.bin
+            bin/targets/ramips/mt7621/*.manifest
+            build.log
+          retention-days: 30
+
+      - name: Create Release
+        if: |
+          (github.event_name == 'release' && github.event.action == 'created') ||
+          (github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true')
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            bin/targets/ramips/mt7621/openwrt-ramips-mt7621-d-team_newifi-d2-*.bin
+            bin/targets/ramips/mt7621/*.manifest
+          tag_name: newifi-d2-${{ github.sha }}
+          name: OpenWrt for Newifi D2 - ${{ github.sha }}
+          body: |
+            ## OpenWrt Firmware for Newifi D2
+
+            ### Hardware
+            - CPU: MediaTek MT7621A @ 880MHz
+            - RAM: 512MB DDR3
+            - Flash: 32MB
+
+            ### Features
+            - ✅ xray-core (Modern protocol + Low CPU)
+            - ✅ PassWall2 (Transparent proxy)
+            - ✅ WireGuard (Fast VPN)
+            - ✅ SmartDNS (Smart DNS resolution)
+            - ✅ Full iptables support (TProxy ready)
+
+            ### Firmware Info
+            - **Size**: ${{ steps.firmware.outputs.size }}
+            - **MD5**: `${{ steps.firmware.outputs.md5 }}`
+            - **SHA256**: `${{ steps.firmware.outputs.sha256 }}`
+
+            ### Installation
+            1. Download the `sysupgrade.bin` file
+            2. Log in to your router's LuCI interface
+            3. Go to System → Backup/Flash Firmware
+            4. Upload and flash the firmware
+
+            ### Build Info
+            - **Commit**: ${{ github.sha }}
+            - **Workflow**: ${{ github.workflow }}
+            - **Run ID**: ${{ github.run_id }}
+
+            ### Notes
+            - This firmware includes PassWall2 feeds from xiaorouji
+            - Make sure to backup your configuration before upgrading
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
