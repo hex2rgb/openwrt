@@ -92,37 +92,73 @@ jobs:
           export GO111MODULE=on
           export GOPROXY=https://proxy.golang.org,direct
           export GOSUMDB=sum.golang.org
-          make -j$(($(nproc) + 1)) V=s 2>&1 | tee build.log
+          make -j$(($(nproc) + 1)) V=s 2>&1 | tee build.log || {
+            echo "=== ❌ Build failed ==="
+            echo "=== Showing last 100 lines of build.log ==="
+            tail -100 build.log
+            echo "=== Searching for error patterns ==="
+            grep -i "error\|failed\|cannot\|undefined" build.log | tail -50 || echo "No error patterns found"
+            exit 1
+          }
 
-      - name: Get firmware info
-        id: firmware
+      - name: Check firmware files
+        id: firmware_check
+        continue-on-error: true
         run: |
-          FIRMWARE_FILE="bin/targets/ramips/mt7621/openwrt-ramips-mt7621-d-team_newifi-d2-squashfs-sysupgrade.bin"
+          FIRMWARE_DIR="bin/targets/ramips/mt7621"
+          
+          echo "=== Checking firmware directory ==="
+          if [ ! -d "$FIRMWARE_DIR" ]; then
+            echo "❌ Directory not found: $FIRMWARE_DIR"
+            echo "exists=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          echo "Directory exists, listing files:"
+          ls -lah "$FIRMWARE_DIR/" || true
+          
+          # Try to find firmware file with pattern matching
+          FIRMWARE_FILE=$(find "$FIRMWARE_DIR" -name "*newifi-d2*.bin" -o -name "*d-team*.bin" | head -1)
+          
+          if [ -z "$FIRMWARE_FILE" ]; then
+            echo "❌ No firmware file found matching pattern"
+            echo "Searching for any .bin files:"
+            find "$FIRMWARE_DIR" -type f -name "*.bin" || echo "No .bin files found"
+            echo "exists=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          echo "✅ Firmware found: $FIRMWARE_FILE"
           FIRMWARE_SIZE=$(du -h "$FIRMWARE_FILE" | cut -f1)
           FIRMWARE_MD5=$(md5sum "$FIRMWARE_FILE" | cut -d' ' -f1)
           FIRMWARE_SHA256=$(sha256sum "$FIRMWARE_FILE" | cut -d' ' -f1)
+          
+          echo "Size: $FIRMWARE_SIZE"
+          echo "MD5: $FIRMWARE_MD5"
+          echo "SHA256: $FIRMWARE_SHA256"
           
           echo "file=$FIRMWARE_FILE" >> $GITHUB_OUTPUT
           echo "size=$FIRMWARE_SIZE" >> $GITHUB_OUTPUT
           echo "md5=$FIRMWARE_MD5" >> $GITHUB_OUTPUT
           echo "sha256=$FIRMWARE_SHA256" >> $GITHUB_OUTPUT
+          echo "exists=true" >> $GITHUB_OUTPUT
 
       - name: Upload firmware artifacts
         uses: actions/upload-artifact@v4
         with:
           name: openwrt-newifi-d2-firmware
           path: |
-            bin/targets/ramips/mt7621/openwrt-ramips-mt7621-d-team_newifi-d2-*.bin
-            bin/targets/ramips/mt7621/*.manifest
+            bin/targets/ramips/mt7621/
             build.log
           retention-days: 30
+          if-no-files-found: warn
 
       - name: Create Release
-        if: success()
+        if: success() && steps.firmware_check.outputs.exists == 'true'
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            bin/targets/ramips/mt7621/openwrt-ramips-mt7621-d-team_newifi-d2-*.bin
+            ${{ steps.firmware_check.outputs.file }}
             bin/targets/ramips/mt7621/*.manifest
           tag_name: newifi-d2-${{ github.run_number }}
           name: OpenWrt for Newifi D2 - Build ${{ github.run_number }}
@@ -142,9 +178,9 @@ jobs:
             - ✅ Full iptables support (TProxy ready)
 
             ### Firmware Info
-            - **Size**: ${{ steps.firmware.outputs.size }}
-            - **MD5**: `${{ steps.firmware.outputs.md5 }}`
-            - **SHA256**: `${{ steps.firmware.outputs.sha256 }}`
+            - **Size**: ${{ steps.firmware_check.outputs.size }}
+            - **MD5**: `${{ steps.firmware_check.outputs.md5 }}`
+            - **SHA256**: `${{ steps.firmware_check.outputs.sha256 }}`
 
             ### Installation
             1. Download the `sysupgrade.bin` file
