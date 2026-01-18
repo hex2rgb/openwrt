@@ -99,6 +99,10 @@ jobs:
           cp ${{ env.CONFIG_FILE }} .config
           make defconfig
 
+      - name: Download dependencies
+        run: |
+          make download -j$(nproc)
+
       - name: Set default IP and password
         run: |
           # Set default IP to 192.168.123.1
